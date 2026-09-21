@@ -1,0 +1,23 @@
+# Datasets and generated artifacts (large binary files)
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Model weights / checkpoints
+*.pt
+*.pth
+*.onnx
+*.weights
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Claude Code local state
+.claude/
