@@ -5,3 +5,18 @@ PyYAML
 requests
 urllib3
 tqdm
+
+# Step 2: training
+ultralytics
+
+# Step 3/4: backend
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic
+reportlab
+pandas
+
+# Step 5: frontend (Phase 1 interim)
+streamlit
+plotly

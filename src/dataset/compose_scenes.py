@@ -16,7 +16,7 @@ import shutil
 import time
 import yaml
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageDraw
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
@@ -28,7 +28,7 @@ OUTPUT_DIR      = os.path.join("data", "yolo_dataset")
 REPORT_PATH     = os.path.join(OUTPUT_DIR, "compositor_report.json")
 
 # ─── Parameters ───────────────────────────────────────────────────────────────
-N_SCENES            = 20_000
+N_SCENES            = 2_500
 TRAIN_SPLIT         = 0.80
 PATCH_SIZE          = 640
 MIN_PARTICLES       = 5
@@ -91,7 +91,9 @@ def soften_color_cast(img: Image.Image) -> Image.Image:
 def build_alpha_sticker(img_path: str, mask_txt_path: str):
     """
     Load a particle crop and its YOLO polygon mask.
-    Returns an RGBA PIL image where background is transparent.
+    Returns (RGBA PIL image with transparent background, polygon points in the
+    crop's own pixel space) so the true outline can be carried through the
+    scale/rotate/paste transform in paste_particle() instead of being discarded.
     """
     img = Image.open(img_path).convert("RGB")
     img = soften_color_cast(img)
@@ -110,8 +112,8 @@ def build_alpha_sticker(img_path: str, mask_txt_path: str):
     coords = list(map(float, parts[1:]))
     pts = []
     for i in range(0, len(coords)-1, 2):
-        px = int(coords[i] * w)
-        py = int(coords[i+1] * h)
+        px = coords[i] * w
+        py = coords[i+1] * h
         pts.append((px, py))
 
     if len(pts) < 3:
@@ -119,9 +121,8 @@ def build_alpha_sticker(img_path: str, mask_txt_path: str):
 
     # Create alpha mask from polygon
     alpha = Image.new("L", (w, h), 0)
-    import PIL.ImageDraw as ImageDraw
     draw = ImageDraw.Draw(alpha)
-    draw.polygon(pts, fill=255)
+    draw.polygon([(int(x), int(y)) for x, y in pts], fill=255)
 
     # Small morphological dilation to avoid hairline white borders
     alpha_np = np.array(alpha)
@@ -131,14 +132,18 @@ def build_alpha_sticker(img_path: str, mask_txt_path: str):
 
     rgba = img.convert("RGBA")
     rgba.putalpha(alpha)
-    return rgba
+    return rgba, pts
 
 
 # ─── Function 2: paste_particle ───────────────────────────────────────────────
-def paste_particle(canvas_rgba, sticker_rgba, class_id, placed_boxes, patch_size):
+def paste_particle(canvas_rgba, sticker_rgba, sticker_pts, class_id, placed_boxes, patch_size):
     """
     Rotate, scale, and paste one sticker onto the canvas.
-    Returns (updated_canvas, yolo_label_str) or (canvas, None) if placement fails.
+    The sticker's true polygon outline (sticker_pts, in the original crop's
+    pixel space) is carried through the same scale + rotation affine transform
+    as the pixels, so the emitted label is the particle's real silhouette
+    rather than its bounding box.
+    Returns (updated_canvas, yolo_label_str, new_box) or (canvas, None) if placement fails.
     """
     sw, sh = sticker_rgba.size
 
@@ -149,10 +154,34 @@ def paste_particle(canvas_rgba, sticker_rgba, class_id, placed_boxes, patch_size
     new_h = max(4, int(sh * scale))
     sticker = sticker_rgba.resize((new_w, new_h), Image.LANCZOS)
 
-    # Random rotation — expand to avoid cropping the sticker
+    # Scale factor actually applied (differs slightly from `scale` due to int rounding)
+    eff_scale_x = new_w / sw
+    eff_scale_y = new_h / sh
+    scaled_pts = [(x * eff_scale_x, y * eff_scale_y) for x, y in sticker_pts]
+
+    # Random rotation via explicit affine matrix (expand-to-fit, like PIL's
+    # rotate(expand=True)) so the polygon points can be transformed with the
+    # exact same matrix as the pixels instead of being re-derived afterward.
     angle = random.uniform(0, 360)
-    sticker = sticker.rotate(angle, expand=True, resample=Image.BICUBIC)
-    rw, rh = sticker.size
+    center = (new_w / 2.0, new_h / 2.0)
+    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+    cos, sin = abs(M[0, 0]), abs(M[0, 1])
+    rw = max(1, int(new_h * sin + new_w * cos))
+    rh = max(1, int(new_h * cos + new_w * sin))
+    M[0, 2] += (rw / 2.0) - center[0]
+    M[1, 2] += (rh / 2.0) - center[1]
+
+    sticker_np = np.array(sticker)
+    rotated_np = cv2.warpAffine(
+        sticker_np, M, (rw, rh),
+        flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0)
+    )
+    sticker = Image.fromarray(rotated_np, mode="RGBA")
+
+    rotated_pts = [
+        (M[0, 0] * x + M[0, 1] * y + M[0, 2], M[1, 0] * x + M[1, 1] * y + M[1, 2])
+        for x, y in scaled_pts
+    ]
 
     # Random position within patch with margin
     margin = 4
@@ -163,7 +192,7 @@ def paste_particle(canvas_rgba, sticker_rgba, class_id, placed_boxes, patch_size
     px = random.randint(margin, max(margin + 1, max_x))
     py = random.randint(margin, max(margin + 1, max_y))
 
-    # Overlap check against already placed particles
+    # Overlap check against already placed particles (axis-aligned approximation)
     new_box = (px, py, px + rw, py + rh)
     for existing_box in placed_boxes:
         if compute_iou(new_box, existing_box) > MAX_OVERLAP_IOU:
@@ -172,20 +201,16 @@ def paste_particle(canvas_rgba, sticker_rgba, class_id, placed_boxes, patch_size
     # Alpha composite paste
     canvas_rgba.paste(sticker, (px, py), sticker)
 
-    # Build YOLO polygon label from bounding box (simplified axis-aligned rect for composited sticker)
-    # Use the 4-corner polygon of the placed sticker (rotated bounding box approximation)
-    cx = (px + px + rw) / 2 / patch_size
-    cy = (py + py + rh) / 2 / patch_size
-    bw = rw / patch_size
-    bh = rh / patch_size
-
-    # 4-point polygon: top-left, top-right, bottom-right, bottom-left (normalized)
-    x1, y1 = max(0, (px) / patch_size),        max(0, (py) / patch_size)
-    x2, y2 = min(1, (px + rw) / patch_size),   max(0, (py) / patch_size)
-    x3, y3 = min(1, (px + rw) / patch_size),   min(1, (py + rh) / patch_size)
-    x4, y4 = max(0, (px) / patch_size),         min(1, (py + rh) / patch_size)
-
-    label_str = f"{class_id} {x1:.6f} {y1:.6f} {x2:.6f} {y2:.6f} {x3:.6f} {y3:.6f} {x4:.6f} {y4:.6f}"
+    # Build the true YOLO segmentation polygon label (particle's real outline,
+    # transformed and translated into canvas space, clamped to [0, 1])
+    final_pts = [
+        (min(1.0, max(0.0, (px + x) / patch_size)), min(1.0, max(0.0, (py + y) / patch_size)))
+        for x, y in rotated_pts
+    ]
+    if len(final_pts) < 3:
+        return canvas_rgba, None
+    coord_str = " ".join(f"{x:.6f} {y:.6f}" for x, y in final_pts)
+    label_str = f"{class_id} {coord_str}"
 
     return canvas_rgba, label_str, new_box
 
@@ -234,8 +259,21 @@ def apply_ibell_optics(img_np: np.ndarray) -> np.ndarray:
     return img_float
 
 
+# ─── Helper: per-class inverse-frequency weights for sticker_pool ─────────────
+def compute_class_balanced_weights(sticker_pool):
+    """
+    Weight each sticker by 1 / (size of its class) so every class carries
+    equal total sampling probability, regardless of how many source images
+    it has (e.g. fragment=3822 vs foam_film=212 vs algae=300).
+    """
+    class_counts = {}
+    for _, _, class_id in sticker_pool:
+        class_counts[class_id] = class_counts.get(class_id, 0) + 1
+    return [1.0 / class_counts[class_id] for _, _, class_id in sticker_pool]
+
+
 # ─── Function 4: generate_scene ───────────────────────────────────────────────
-def generate_scene(scene_idx, canvas_files, sticker_pool, rng_seed):
+def generate_scene(scene_idx, canvas_files, sticker_pool, sticker_weights, rng_seed):
     """
     Generate one synthetic scene.
     Returns (scene_np, label_lines_list) or None on failure.
@@ -254,18 +292,19 @@ def generate_scene(scene_idx, canvas_files, sticker_pool, rng_seed):
     oy = random.randint(0, max_y) if max_y > 0 else 0
     canvas_patch = canvas_img.crop((ox, oy, ox + PATCH_SIZE, oy + PATCH_SIZE)).convert("RGBA")
 
-    # Pick and paste 5-15 particles
+    # Pick and paste 5-15 particles, class-balanced via inverse-frequency weights
     n_particles = random.randint(MIN_PARTICLES, MAX_PARTICLES)
-    candidates = random.choices(sticker_pool, k=n_particles)
+    candidates = random.choices(sticker_pool, weights=sticker_weights, k=n_particles)
 
     label_lines = []
     placed_boxes = []
 
     for img_path, mask_path, class_id in candidates:
-        sticker = build_alpha_sticker(img_path, mask_path)
-        if sticker is None:
+        sticker_data = build_alpha_sticker(img_path, mask_path)
+        if sticker_data is None:
             continue
-        result = paste_particle(canvas_patch, sticker, class_id, placed_boxes, PATCH_SIZE)
+        sticker_rgba, sticker_pts = sticker_data
+        result = paste_particle(canvas_patch, sticker_rgba, sticker_pts, class_id, placed_boxes, PATCH_SIZE)
         if len(result) == 3:
             canvas_patch, label_str, box = result
             if label_str:
@@ -319,6 +358,7 @@ def run_compositor():
                 sticker_pool.append((os.path.join(p_folder, fname), mask_path, class_id))
 
     print(f"[Init] Sticker pool: {len(sticker_pool)} particle stickers.")
+    sticker_weights = compute_class_balanced_weights(sticker_pool)
 
     # Determine train/val split indices
     indices = list(range(N_SCENES))
@@ -338,7 +378,7 @@ def run_compositor():
         lbl_out = os.path.join(OUTPUT_DIR, "labels", split, scene_name + ".txt")
 
         try:
-            result = generate_scene(i, canvas_files, sticker_pool, rng_seed=SEED + i)
+            result = generate_scene(i, canvas_files, sticker_pool, sticker_weights, rng_seed=SEED + i)
             if result is None:
                 failed += 1
                 continue

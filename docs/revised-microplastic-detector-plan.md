@@ -4,8 +4,8 @@ A comprehensive, lab-standard screening tool combining an **IBELL USB microscope
 
 > [!NOTE]
 > **Phase Demarcation**:
-> - **Phase 1 (Current Focus)**: Core Vision AI, multi-model evaluation (YOLOv8 vs YOLO11), gridded filter paper detection, particle sizing ($\mu m$), laboratory concentration calculation ($\text{particles/L}$), interactive React dashboard, particle inspector, and PDF/CSV reporting.
-> - **Phase 2 (Deferred Hardware Integration)**: Arduino/ESP32 hardware probes, live pH & TDS sensor telemetry, and chemical water quality gauges.
+> - **Phase 1 (Current Focus)**: Core Vision AI, multi-model evaluation (YOLOv8 vs YOLO11), gridded filter paper detection via **static image upload**, particle sizing ($\mu m$), laboratory concentration calculation ($\text{particles/L}$), interim Streamlit dashboard, particle inspector, and PDF/CSV reporting.
+> - **Phase 2 (Deferred)**: All hardware (Arduino/ESP32 probes, live pH & TDS sensor telemetry, chemical water quality gauges), live IBELL USB microscope video streaming, and migration to a production React dashboard.
 
 ---
 
@@ -25,19 +25,21 @@ A comprehensive, lab-standard screening tool combining an **IBELL USB microscope
    - We evaluate 3 candidate segmentation architectures (`yolov8n-seg`, `yolo11n-seg`, and `yolo11s-seg`) against a classical CV baseline.
    - Specifically compares **thin fibre recall** (resolving threads only 2–4 px wide) against inference latency on the local RTX 4060 GPU and CPU fallback, selecting the champion model for deployment.
 
-4. **The Control Panel (FastAPI + React Dashboard)**
-   - High-speed web interface with live microscope streaming and image upload options.
+4. **The Control Panel (FastAPI + Streamlit Dashboard, interim)**
+   - Web interface with static image upload (no live camera feed in Phase 1).
    - Toggleable polygon segmentation masks, bounding boxes, and confidence labels.
    - Morphotype breakdown distribution charts, particle size histograms ($\mu m$), and clickable particle inspector.
    - PDF & CSV export for laboratory reporting and audit trails.
+   - A production **React dashboard** rebuild is deferred to Phase 2, once live video streaming and the hardware telemetry surface are also ready to integrate.
 
 5. **The Expert Assistant (OpenRouter AI Chatbot)**
    - Powered by OpenRouter free-tier LLMs (e.g. Gemini 2.0 Flash, LLaMA 3.3 70B).
    - Context-aware: automatically receives particle counts, morphotypes, and filtered sample volume.
    - Answers water safety questions, identifies likely plastic sources (synthetic textiles, bottle shards, degraded packaging), and suggests filtration strategies.
 
-6. **Hardware Health Check (pH & TDS Probes) — [Phase 2 Deferred]**
+6. **Hardware Telemetry & Live Microscope Streaming — [Phase 2 Deferred]**
    - Connects an Arduino / ESP32 with analog pH and TDS probes over USB serial to correlate chemical water quality with physical plastic particulate counts.
+   - Adds continuous live UVC video streaming from the IBELL USB microscope (OpenCV video manager) as an alternative to Phase 1's static image upload.
 
 ---
 
@@ -47,12 +49,13 @@ A comprehensive, lab-standard screening tool combining an **IBELL USB microscope
 flowchart TD
     subgraph INPUT["1. Input Modality"]
         FILT["Gridded Membrane Filter Paper<br/>Water sample filtered through 0.45/1.2 µm membrane"]
-        CAM["IBELL USB Microscope<br/>Live UVC Stream or Image Upload"]
-        FILT --- CAM
+        UPLOAD["Image Upload<br/>IBELL USB Microscope Photo"]
+        LIVE["Live UVC Stream<br/>IBELL USB Microscope"]
+        FILT --- UPLOAD
+        FILT --- LIVE
     end
 
     subgraph PHASE1["2. Phase 1 Core Backend - FastAPI"]
-        CAPTURE["OpenCV Video Manager"]
         YOLO["Champion Segmentation Model<br/>YOLOv8-Seg / YOLO11-Seg"]
         SIZER["Morphological Sizing Engine - µm<br/>Laplacian Sharpness Filter"]
         TIER["Two-Tier Output & Quarantine Gate<br/>Tier 1: Total Plastic vs Reject<br/>Tier 2: Fibre / Frag / Pellet / Foam / Unclassified"]
@@ -61,8 +64,8 @@ flowchart TD
         EXPORTER["PDF / CSV Exporter"]
     end
 
-    subgraph FRONTEND["3. Modern React Dashboard"]
-        UI_FEED["Live Video Stream & Polygon Masks"]
+    subgraph FRONTEND["3. Streamlit Dashboard - Phase 1 Interim"]
+        UI_FEED["Uploaded Image & Polygon Masks"]
         UI_INPUTS["Sample Volume - mL/L & Grid Selector"]
         UI_METRICS["Tier 1: Total Count & Particles/L Gauge"]
         UI_CHARTS["Tier 2: Morphotype Breakdown & Size Histogram"]
@@ -71,20 +74,25 @@ flowchart TD
         UI_EXPORT["PDF / CSV Report Download"]
     end
 
-    subgraph PHASE2["4. Phase 2 Hardware Telemetry - Deferred"]
+    subgraph PHASE2["4. Phase 2 Hardware, Live Streaming & React Migration - Deferred"]
+        CAPTURE["OpenCV Video Manager<br/>Live Frame Capture"]
         MCU["Arduino / ESP32<br/>pH & TDS Probes via Serial"]
         PRESETS["Water Quality Presets<br/>Packaged / Tap / Pond"]
+        REACT["Production React Dashboard<br/>Vite + Tailwind + Recharts"]
     end
 
-    CAM --> CAPTURE --> YOLO --> SIZER --> TIER --> CONC --> UI_METRICS
+    UPLOAD --> YOLO --> SIZER --> TIER --> CONC --> UI_METRICS
     TIER --> UI_CHARTS
     TIER --> UI_INSPECT
     YOLO --> UI_FEED
     CONC --> UI_CHAT
     LLM --> UI_CHAT
     CONC --> EXPORTER --> UI_EXPORT
+    LIVE -. "Phase 2" .-> CAPTURE
+    CAPTURE -. "Phase 2" .-> YOLO
     MCU -. "Phase 2" .-> FRONTEND
     PRESETS -. "Phase 2" .-> FRONTEND
+    FRONTEND -. "Phase 2 rebuild" .-> REACT
 ```
 
 ---
@@ -111,7 +119,8 @@ flowchart TD
   - Classical CV baseline (Otsu adaptive thresholding control)
 - **Frameworks**: PyTorch (CUDA on NVIDIA RTX 4060 GPU), Ultralytics, OpenCV (`cv2`), NumPy, PIL.
 - **Backend**: Python 3.10+, FastAPI, Uvicorn, ReportLab (PDF), Pandas (CSV).
-- **Frontend**: React 18, Vite, Tailwind CSS, Lucide React Icons, Recharts, Axios.
+- **Frontend (Phase 1, interim)**: Streamlit, Plotly/Altair (charts), `st.file_uploader` static image upload workflow — no live video in Phase 1.
+- **Frontend (Phase 2, deferred)**: React 18, Vite, Tailwind CSS, Lucide React Icons, Recharts, Axios — production rebuild with live UVC video feed once hardware telemetry lands.
 - **AI Diagnostics**: OpenRouter API (`google/gemini-2.0-flash-exp:free`, `meta-llama/llama-3.3-70b-instruct:free`).
 
 ---
@@ -133,11 +142,11 @@ flowchart TD
   - Two-tier output logic: Tier 1 (Total Plastics / L) and Tier 2 (Morphotypes).
   - Confidence gate (< 45% -> "Unclassified Debris").
 - [ ] **Step 4: FastAPI Backend**
-  - Camera streaming and image upload inference endpoints.
+  - Image upload inference endpoint (live camera streaming deferred to Phase 2).
   - OpenRouter AI diagnostic endpoint.
   - PDF & CSV report generation.
-- [ ] **Step 5: Modern React Dashboard**
-  - Live video stream with polygon mask overlays.
+- [ ] **Step 5: Streamlit Dashboard (Interim)**
+  - Uploaded image display with polygon mask overlays.
   - Interactive particle inspector gallery with "Unclassified Debris" review tab.
   - Concentration gauge and morphology charts.
   - AI chat assistant and export buttons.
@@ -146,8 +155,71 @@ flowchart TD
 
 ---
 
-### Phase 2 — IoT Sensor Subsystem (Deferred)
+### Phase 2 — Hardware, Live Streaming & React Migration (Deferred)
 - [ ] Connect Arduino/ESP32 analog pH and TDS probes.
 - [ ] Implement USB serial listener at 115200 baud.
 - [ ] Integrate WHO/BIS color-coded safety telemetry cards into the dashboard.
 - [ ] Flash Arduino sketch (`scripts/arduino_water_sensors.ino`).
+- [ ] Implement live UVC microscope video streaming (OpenCV Video Manager) as an alternative input path to Phase 1's static image upload.
+- [ ] Rebuild the dashboard in React (Vite + Tailwind + Recharts), replacing the Streamlit interim, with live video feed, particle inspector, and hardware telemetry cards.
+
+---
+
+## 6. Project Directory Structure
+
+Maps each folder to the roadmap step that owns it. `[done]` has real logic; `[scaffolded]`
+exists with typed function signatures and `NotImplementedError` bodies, ready to fill in;
+Phase 2 paths are documented but not created yet.
+
+```
+water-microplasts/
+├── .env.example                 # OPENROUTER_API_KEY, CORS_ORIGINS, ... (copy to .env)         [scaffolded]
+├── pytest.ini                   # pythonpath=. so tests import `src.*` without installing        [scaffolded]
+├── data/                        # datasets (raw inputs gitignored; manifests/reports tracked)
+│   ├── raw/                     # CLASE_0, CLASE_1, 26511253, Microplastics & Algae, ph-tds...  [done]
+│   ├── cleaned/                 # particles, particle_masks, canvas_backgrounds, negatives      [done]
+│   ├── yolo_dataset/            # composited images/labels + dataset.yaml (Step 1 output)        [done]
+│   └── report_images/           # sample frames for Step 6 end-to-end verification               [done]
+├── docs/                        # planning docs, PRDs, dataset spec                              [done]
+├── models/                      # Step 2 — trained weights + benchmark artifacts
+│   ├── README.md                # folder contract (weights gitignored, only report is tracked)   [scaffolded]
+│   ├── yolov8n-seg/             # created by train.py at run time
+│   ├── yolo11n-seg/
+│   ├── yolo11s-seg/
+│   └── benchmark_report.json    # mAP50-95, thin-fibre recall, latency comparison
+├── src/
+│   ├── dataset/                 # Step 1 — mask extraction, cleaning, scene compositor           [done]
+│   ├── training/                # Step 2 — multi-model train + benchmark harness                 [scaffolded]
+│   │   ├── train.py
+│   │   └── benchmark.py
+│   ├── sizing/                  # Step 3 — µm sizing, two-tier engine, quarantine gate
+│   │   ├── sizing_engine.py     # min-area bbox + Laplacian sharpness filter                     [scaffolded]
+│   │   ├── two_tier.py          # Tier 1 total count / Tier 2 morphotype breakdown               [scaffolded]
+│   │   └── quarantine_gate.py   # confidence < 45% -> Unclassified Debris                        [done]
+│   ├── backend/                 # Step 4 — FastAPI (`uvicorn src.backend.main:app --reload`)
+│   │   ├── main.py              # app, CORS, router wiring, /health                              [done]
+│   │   ├── config.py            # env-var settings, fails fast if secrets are missing            [done]
+│   │   ├── routes/
+│   │   │   ├── inference.py     # image-upload inference endpoint                                [scaffolded]
+│   │   │   ├── assistant.py     # OpenRouter AI diagnostic endpoint                               [scaffolded]
+│   │   │   └── export.py        # PDF/CSV report endpoints                                        [scaffolded]
+│   │   └── services/
+│   │       ├── openrouter_client.py                                                              [scaffolded]
+│   │       ├── pdf_exporter.py                                                                   [scaffolded]
+│   │       └── csv_exporter.py                                                                   [scaffolded]
+│   └── frontend_streamlit/      # Step 5 — interim Phase 1 dashboard (`streamlit run src/frontend_streamlit/app.py`)
+│       ├── app.py               # upload widget + placeholder sections, runs today               [done]
+│       └── components/
+│           ├── inspector.py     # clickable particle inspector + quarantine tab                  [scaffolded]
+│           ├── charts.py        # concentration gauge + morphology histograms                    [scaffolded]
+│           └── chat_dock.py     # AI chatbot dock                                                 [scaffolded]
+├── tests/                       # pytest, mirrors src/ (80%+ coverage target)                    [scaffolded]
+│   ├── dataset/
+│   ├── training/
+│   ├── sizing/                  # test_quarantine_gate.py covers the one real implementation      [done]
+│   └── backend/
+├── scripts/                     # Phase 2 — arduino_water_sensors.ino (pH/TDS serial sketch)      [not created]
+├── frontend_react/              # Phase 2 — production dashboard rebuild (Vite/Tailwind/Recharts) [not created]
+├── requirements.txt
+└── .gitignore
+```

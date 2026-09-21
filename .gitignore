@@ -15,6 +15,16 @@ env/
 *.onnx
 *.weights
 
+# Ultralytics default run outputs (train.py/benchmark.py redirect real runs to models/)
+runs/
+
+# Training/validation diagnostic images under models/ (large, regeneratable via val/train)
+models/**/*.jpg
+models/**/*.png
+
+# Secrets
+.env
+
 # OS / editor
 .DS_Store
 Thumbs.db
