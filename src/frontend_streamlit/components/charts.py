@@ -61,18 +61,29 @@ def render_presence(tier1: dict) -> None:
         st.success("**Microplastics present: No**")
 
 
+_SMALL_SAMPLE_THRESHOLD = 5  # below this, a bar/histogram is just one full-height bar — stat cards read easier
+
+
 def render_morphology(tier2: list[dict], height: int = 300) -> None:
     """Render the morphotype breakdown and particle size distribution.
 
+    Below ``_SMALL_SAMPLE_THRESHOLD`` confirmed particles, a bar chart and a
+    histogram degenerate into a single full-height bar/bin — not a real
+    distribution — so compact per-particle stat cards are shown instead.
+
     Args:
         tier2: Per-particle dicts as returned by ``compute_tier2()``.
-        height: Per-chart height in pixels.
+        height: Per-chart height in pixels (large-sample view only).
     """
     if not tier2:
         st.info("No confirmed plastic particles to chart yet.")
         return
 
     df = pd.DataFrame(tier2)
+
+    if len(df) < _SMALL_SAMPLE_THRESHOLD:
+        _render_morphology_cards(df)
+        return
 
     col1, col2 = st.columns(2)
 
@@ -82,11 +93,15 @@ def render_morphology(tier2: list[dict], height: int = 300) -> None:
             {"class_name": list(class_counts.keys()), "count": list(class_counts.values())}
         )
         bar_fig = px.bar(
-            bar_df, x="class_name", y="count",
+            bar_df, x="class_name", y="count", text="count",
             title="Morphotype Breakdown", color="class_name",
             labels={"class_name": "Morphotype", "count": "Count"},
         )
-        bar_fig.update_layout(height=height, showlegend=False, margin=dict(l=20, r=20, t=50, b=10))
+        bar_fig.update_traces(textposition="outside")
+        bar_fig.update_layout(
+            height=height, showlegend=False, margin=dict(l=20, r=20, t=50, b=10),
+            yaxis=dict(dtick=1, rangemode="tozero"),
+        )
         st.plotly_chart(bar_fig, use_container_width=True)
 
     with col2:
@@ -97,3 +112,22 @@ def render_morphology(tier2: list[dict], height: int = 300) -> None:
         )
         hist_fig.update_layout(height=height, margin=dict(l=20, r=20, t=50, b=10))
         st.plotly_chart(hist_fig, use_container_width=True)
+
+
+def _render_morphology_cards(df: pd.DataFrame) -> None:
+    """Compact per-class count cards + a size table for small samples."""
+    n = len(df)
+    st.caption(f"{n} confirmed particle{'s' if n != 1 else ''} — too few for a meaningful distribution chart.")
+
+    st.markdown("**Morphotype Breakdown**")
+    class_counts = Counter(df["class_name"])
+    count_cols = st.columns(len(class_counts))
+    for col, (class_name, count) in zip(count_cols, class_counts.items()):
+        with col:
+            st.metric(class_name.capitalize(), count)
+
+    st.markdown("**Particle Sizes**")
+    size_df = df[["class_name", "length_um", "width_um"]].rename(
+        columns={"class_name": "Morphotype", "length_um": "Length (µm)", "width_um": "Width (µm)"}
+    )
+    st.dataframe(size_df, hide_index=True, use_container_width=True)
