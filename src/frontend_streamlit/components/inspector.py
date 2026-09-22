@@ -7,7 +7,6 @@ _GALLERY_COLUMNS = 4
 
 
 def render_placeholder() -> None:
-    st.subheader("Particle Inspector")
     st.caption("Populated once Step 4 inference results are wired in.")
 
 
@@ -41,22 +40,24 @@ def _render_gallery(image: Image.Image, particles: list[dict], empty_message: st
                     st.write("In focus: " + ("yes" if particle["in_focus"] else "no"))
 
 
-def render(image: Image.Image, confirmed: list[dict], quarantine: list[dict]) -> None:
+def render(image: Image.Image, confirmed: list[dict], quarantine: list[dict], height: int = 420) -> None:
     """Render the particle inspector gallery with a quarantine review tab.
 
     Args:
         image: The original uploaded PIL image (bboxes are in its pixel space).
         confirmed: Detections that passed the confidence quarantine gate.
         quarantine: Low-confidence detections routed to "Unclassified Debris".
+        height: Fixed pixel height of the scrollable gallery area — keeps a
+            large particle count from growing the overall page height.
     """
-    st.subheader("Particle Inspector")
-
     confirmed_tab, quarantine_tab = st.tabs([
         f"Confirmed Particles ({len(confirmed)})",
         f"Unclassified Debris ({len(quarantine)})",
     ])
     with confirmed_tab:
-        _render_gallery(image, confirmed, "No confirmed particles in this sample.")
+        with st.container(height=height):
+            _render_gallery(image, confirmed, "No confirmed particles in this sample.")
     with quarantine_tab:
         st.caption("Below the confidence quarantine gate — review before trusting the classification.")
-        _render_gallery(image, quarantine, "Nothing was quarantined in this sample.")
+        with st.container(height=height):
+            _render_gallery(image, quarantine, "Nothing was quarantined in this sample.")
