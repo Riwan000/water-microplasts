@@ -28,7 +28,7 @@ OUTPUT_DIR      = os.path.join("data", "yolo_dataset")
 REPORT_PATH     = os.path.join(OUTPUT_DIR, "compositor_report.json")
 
 # ─── Parameters ───────────────────────────────────────────────────────────────
-N_SCENES            = 2_500
+N_SCENES            = 20_000
 TRAIN_SPLIT         = 0.80
 PATCH_SIZE          = 640
 MIN_PARTICLES       = 5

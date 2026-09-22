@@ -132,10 +132,11 @@ flowchart TD
   - Extract polygon masks from `26511253` crops and `Microplastics and algae`.
   - Composite particles onto `CLASE_0` gridded filter paper backgrounds.
   - Apply 50% synthetic IBELL optical degradation (vignette, LED hotspot, chromatic fringing, defocus blur, noise).
-- [ ] **Step 2: Multi-Model Training & Benchmarking**
+- [x] **Step 2: Multi-Model Training & Benchmarking**
   - Train `yolov8n-seg`, `yolo11n-seg`, and `yolo11s-seg` on RTX 4060 GPU.
   - Run comparative benchmark: Mask mAP50-95, thin fibre recall, inference latency.
-  - Select champion model for FastAPI deployment.
+  - Select champion model for FastAPI deployment. **Champion: `yolo11s-seg`** (20k-scene/100-epoch run) — mask mAP50-95 0.684, thin-fibre recall 0.762 on synthetic val, see `models/benchmark_report.json`.
+  - **Real-data fibre fine-tune attempt** (`models/yolo11s-seg-finetune-fibre-unfrozen`): warm-started from the champion, fine-tuned on 60 hand-reviewed real fibre images (`data/real_labels/fibre_batch1`, deliberately the fibre-richest images in the real test pool) + a 20% synthetic rehearsal sample, full backbone unfrozen. Looked like a clean win on those same 60 images (fibre Mask-R 0.163 -> 0.394, Mask-P 0.316 -> 0.532), but a full run across all 2,499 real test images exposed class collapse: fibre detection count exploded 7.2x (2,196 -> 15,758) while every other class's count dropped, and average fibre confidence fell toward the conf floor -- the model became fibre-trigger-happy rather than genuinely more accurate, because the 60-image validation set had no sparse/negative examples to catch it. **Reverted** `CHAMPION_WEIGHTS_PATH` back to the original `yolo11s-seg` champion. Next attempt needs real images spanning the full fibre-density range, not just the fibre-richest ones.
 - [ ] **Step 3: Sizing, Two-Tier Engine & Quarantine Gate**
   - Minimum area bounding box for length and width in $\mu m$.
   - Laplacian variance sharpness filter to discard out-of-focus particles.

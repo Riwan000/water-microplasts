@@ -1,23 +1,23 @@
 [
   {
     "model_name": "yolov8n-seg",
-    "mask_map50_95": 0.5538949027500069,
-    "thin_fibre_recall": 0.62644,
-    "latency_ms_gpu": 20.26041999924928,
-    "latency_ms_cpu": 96.04691000131425
+    "mask_map50_95": 0.5619950596318277,
+    "thin_fibre_recall": 0.63859,
+    "latency_ms_gpu": 15.978345001349224,
+    "latency_ms_cpu": 96.1342650000006
   },
   {
     "model_name": "yolo11n-seg",
-    "mask_map50_95": 0.5527646011867862,
-    "thin_fibre_recall": 0.62644,
-    "latency_ms_gpu": 15.196575000300072,
-    "latency_ms_cpu": 113.554815002135
+    "mask_map50_95": 0.5609894056443296,
+    "thin_fibre_recall": 0.64634,
+    "latency_ms_gpu": 15.770069998688998,
+    "latency_ms_cpu": 87.70021499949507
   },
   {
     "model_name": "yolo11s-seg",
-    "mask_map50_95": 0.5790323103278794,
-    "thin_fibre_recall": 0.65083,
-    "latency_ms_gpu": 18.635760000324808,
-    "latency_ms_cpu": 192.24312499864027
+    "mask_map50_95": 0.6842850408241329,
+    "thin_fibre_recall": 0.76186,
+    "latency_ms_gpu": 16.025529999751598,
+    "latency_ms_cpu": 179.17196000053082
   }
 ]
