@@ -36,6 +36,29 @@ from src.sizing.two_tier import compute_tier1, compute_tier2
 
 router = APIRouter()
 
+
+def _instance_contours(mask_chw: np.ndarray, orig_w: int, orig_h: int) -> list[np.ndarray]:
+    """Split one instance's raw mask into its separate connected contours.
+
+    ``result.masks.xy`` concatenates every disconnected blob of a single
+    instance's mask into one point array (common for fragmented real-world
+    masks split by grid lines or occlusion), which draws as bogus straight
+    lines bridging unrelated blobs if treated as one closed polygon. Finding
+    contours directly on the raw mask keeps each blob separate.
+
+    Args:
+        mask_chw: One instance's binary mask at the model's mask resolution
+            (``result.masks.data[i]``), NOT the original image size.
+        orig_w: Original image width in pixels.
+        orig_h: Original image height in pixels.
+
+    Returns:
+        Contours in original-image pixel coordinates, largest area first.
+    """
+    resized = cv2.resize(mask_chw, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
+    contours, _ = cv2.findContours(resized, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    return sorted(contours, key=cv2.contourArea, reverse=True)
+
 # ── Colour map for polygon overlays (BGR) ────────────────────────────────────
 _CLASS_COLOURS: dict[str, tuple[int, int, int]] = {
     "fibre":     (255, 100,  50),   # blue-ish
@@ -135,8 +158,10 @@ async def infer_image(
     confirmed: list[ParticleDetail] = []
     quarantine: list[ParticleDetail] = []
 
+    mask_data = masks.data.cpu().numpy() if masks is not None else None
+
     if masks is not None and len(masks) > 0:
-        for idx, (polygon, box) in enumerate(zip(masks.xy, boxes)):
+        for idx, box in enumerate(boxes):
             conf     = float(box.conf[0])
             cls_id   = int(box.cls[0])
             cls_name = class_names.get(cls_id, str(cls_id))
@@ -148,8 +173,11 @@ async def infer_image(
             crop = img_bgr[y1:y2, x1:x2]
             focused = is_in_focus(crop) if crop.size > 0 else False
 
-            # ── Sizing ────────────────────────────────────────────────────────
-            pts = [(float(p[0]), float(p[1])) for p in polygon]
+            # ── Split mask into separate blobs (avoids bridging artifacts) ──────
+            contours = _instance_contours(mask_data[idx], img_bgr.shape[1], img_bgr.shape[0])
+
+            # ── Sizing (largest connected blob only) ─────────────────────────────
+            pts = [(float(p[0][0]), float(p[0][1])) for p in contours[0]] if contours else []
             if len(pts) >= 3:
                 dims = measure_particle(pts, px_to_um)
             else:
@@ -184,14 +212,13 @@ async def infer_image(
             else:
                 quarantine.append(detail)
 
-            # ── Draw polygon overlay ──────────────────────────────────────────
+            # ── Draw polygon overlay (each blob drawn separately) ────────────────
             colour = _CLASS_COLOURS.get(cls_name, _DEFAULT_COLOUR)
-            if len(pts) >= 3:
-                poly_arr = np.array(pts, dtype=np.int32).reshape(-1, 1, 2)
-                overlay  = annotated.copy()
-                cv2.fillPoly(overlay, [poly_arr], colour)
+            if contours:
+                overlay = annotated.copy()
+                cv2.fillPoly(overlay, contours, colour)
                 annotated = cv2.addWeighted(overlay, 0.35, annotated, 0.65, 0)
-                cv2.polylines(annotated, [poly_arr], isClosed=True, color=colour, thickness=2)
+                cv2.polylines(annotated, contours, isClosed=True, color=colour, thickness=2)
             else:
                 cv2.rectangle(annotated, (x1, y1), (x2, y2), colour, 2)
 

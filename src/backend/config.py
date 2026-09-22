@@ -1,18 +1,13 @@
 """
 Runtime settings loaded from environment variables (see .env.example).
-Fails fast at import time if a required secret is missing, per the
-project's "validate required secrets at startup" security rule.
 """
 
 import os
 from dataclasses import dataclass
 
+from dotenv import load_dotenv
 
-def _require_env(name: str) -> str:
-    value = os.environ.get(name)
-    if not value:
-        raise RuntimeError(f"Missing required environment variable: {name}")
-    return value
+load_dotenv()
 
 
 @dataclass(frozen=True)
@@ -25,7 +20,9 @@ class Settings:
 
 def load_settings() -> Settings:
     return Settings(
-        openrouter_api_key=_require_env("OPENROUTER_API_KEY"),
+        # Optional for now (see GitHub issue: re-enable AI assistant once a key
+        # is configured) — main.py only mounts the /assistant router when set.
+        openrouter_api_key=os.environ.get("OPENROUTER_API_KEY", ""),
         openrouter_model=os.environ.get("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free"),
         champion_weights_path=os.environ.get("CHAMPION_WEIGHTS_PATH", "models/champion.pt"),
         cors_origins=os.environ.get("CORS_ORIGINS", "http://localhost:8501").split(","),

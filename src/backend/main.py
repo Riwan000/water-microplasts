@@ -26,10 +26,15 @@ app.add_middleware(
 )
 
 app.include_router(inference.router, prefix="/inference", tags=["inference"])
-app.include_router(assistant.router, prefix="/assistant", tags=["assistant"])
 app.include_router(export.router, prefix="/export", tags=["export"])
+
+# AI assistant needs OPENROUTER_API_KEY (see GitHub issue: re-enable AI
+# assistant). Not mounted at all when no key is configured, rather than
+# exposing an endpoint that would fail on every call.
+if settings.openrouter_api_key:
+    app.include_router(assistant.router, prefix="/assistant", tags=["assistant"])
 
 
 @app.get("/health")
 def health_check() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "assistant_enabled": str(bool(settings.openrouter_api_key)).lower()}
