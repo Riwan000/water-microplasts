@@ -84,7 +84,8 @@ def _load_model() -> YOLO:
     if not Path(weights).exists():
         raise RuntimeError(
             f"Champion weights not found at '{weights}'. "
-            "Set CHAMPION_WEIGHTS_PATH in .env."
+            "Run `python -m src.training.benchmark --promote-only` or set "
+            "CHAMPION_WEIGHTS_PATH in .env."
         )
     return YOLO(weights)
 

@@ -5,13 +5,16 @@ inference latency (RTX 4060 GPU + CPU fallback), then writes
 models/benchmark_report.json.
 """
 
+import argparse
 import json
+import shutil
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from ultralytics import YOLO
 
+from src.backend.config import load_settings
 from src.training.train import CANDIDATE_MODELS, MODELS_DIR
 
 FIBRE_CLASS_NAME = "fibre"
@@ -66,7 +69,33 @@ def _pick_champion(results: list[BenchmarkResult]) -> BenchmarkResult:
     return max(results, key=lambda r: (r.mask_map50_95, r.thin_fibre_recall))
 
 
-def main() -> None:
+def load_report(report_path: str) -> list[BenchmarkResult]:
+    with open(report_path) as f:
+        return [BenchmarkResult(**row) for row in json.load(f)]
+
+
+def promote_champion(champion: BenchmarkResult, models_dir: str, champion_path: str) -> Path:
+    """Copy the champion's best.pt to the path the backend loads (CHAMPION_WEIGHTS_PATH)."""
+    source = Path(models_dir) / champion.model_name / "weights" / "best.pt"
+    if not source.exists():
+        raise FileNotFoundError(f"Champion weights missing at {source}; cannot promote {champion.model_name}.")
+    destination = Path(champion_path)
+    if destination.exists() and destination.resolve() == source.resolve():
+        return destination  # CHAMPION_WEIGHTS_PATH already points at this run's best.pt
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+    return destination
+
+
+def _promote(results: list[BenchmarkResult]) -> None:
+    champion = _pick_champion(results)
+    destination = promote_champion(champion, MODELS_DIR, load_settings().champion_weights_path)
+    print(f"[Benchmark] Champion: {champion.model_name} "
+          f"(mask_mAP50-95={champion.mask_map50_95:.4f}, thin_fibre_recall={champion.thin_fibre_recall:.4f}) "
+          f"-> promoted to {destination}")
+
+
+def run_benchmark() -> list[BenchmarkResult]:
     dataset_yaml = "data/yolo_dataset/dataset.yaml"
     val_images_dir = Path("data/yolo_dataset/images/val")
     sample_image = str(next(val_images_dir.glob("*.jpg")))
@@ -84,9 +113,19 @@ def main() -> None:
         raise SystemExit("No trained candidate weights found. Run train.py for each candidate first.")
 
     write_report(results, str(Path(MODELS_DIR) / "benchmark_report.json"))
-    champion = _pick_champion(results)
-    print(f"[Benchmark] Champion: {champion.model_name} "
-          f"(mask_mAP50-95={champion.mask_map50_95:.4f}, thin_fibre_recall={champion.thin_fibre_recall:.4f})")
+    return results
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Benchmark candidates and promote the champion.")
+    parser.add_argument("--promote-only", action="store_true",
+                        help="Skip evaluation; promote the champion from the existing benchmark_report.json.")
+    args = parser.parse_args()
+
+    if args.promote_only:
+        _promote(load_report(str(Path(MODELS_DIR) / "benchmark_report.json")))
+    else:
+        _promote(run_benchmark())
 
 
 if __name__ == "__main__":

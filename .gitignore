@@ -31,3 +31,6 @@ Thumbs.db
 
 # Claude Code local state
 .claude/
+
+# Training console logs
+*.log
