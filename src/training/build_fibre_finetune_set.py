@@ -2,8 +2,12 @@
 Builds the fibre fine-tune dataset from a reviewed real-image label batch:
   - copies the reviewed real images + writes YOLO-seg fibre-only labels to
     data/real_labels/<batch_name>/
+  - holds out a seeded fraction of the real images as a real-only test set
+    (test.txt, used as the val split so checkpoint selection sees real data)
   - samples a fraction of the existing synthetic train set for rehearsal
-  - writes a combined train.txt + dataset.yaml under data/finetune_fibre/
+  - writes a combined train.txt (real train images repeated --real-repeat
+    times so they are not drowned out by synthetic data) + dataset.yaml
+    under data/finetune_fibre/
 
 Ground truth source: JSON docs exported from the "Fibre Ground Truth" review
 artifact (one per image, with model + human-added fibre instances and a
@@ -19,7 +23,6 @@ from pathlib import Path
 FIBRE_CLASS_ID = 0
 REAL_IMAGES_SRC = Path("data/cleaned/benchmark_real/test")
 SYNTH_TRAIN_IMAGES = Path("data/yolo_dataset/images/train")
-SYNTH_VAL_IMAGES = Path("data/yolo_dataset/images/val")
 DATASET_YAML_NAMES = ["fibre", "fragment", "pellet", "foam_film", "algae"]
 
 
@@ -57,6 +60,16 @@ def build_real_labels(reviewed_dir: Path, out_dir: Path) -> list[Path]:
     return written
 
 
+def split_real(images: list[Path], holdout_fraction: float, seed: int) -> tuple[list[Path], list[Path]]:
+    """Deterministically split real images into (train, test); test is never trained on."""
+    if not 0.0 < holdout_fraction < 1.0:
+        raise ValueError(f"holdout_fraction must be in (0, 1), got {holdout_fraction}")
+    shuffled = sorted(images)
+    random.Random(seed).shuffle(shuffled)
+    n_test = max(1, round(len(shuffled) * holdout_fraction))
+    return sorted(shuffled[n_test:]), sorted(shuffled[:n_test])
+
+
 def sample_synthetic(fraction: float, seed: int) -> list[Path]:
     all_images = sorted(SYNTH_TRAIN_IMAGES.glob("*.jpg"))
     rng = random.Random(seed)
@@ -66,16 +79,30 @@ def sample_synthetic(fraction: float, seed: int) -> list[Path]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build the fibre fine-tune dataset.")
-    parser.add_argument("--reviewed-dir", required=True, help="Dir of exported per-image review JSON docs")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--reviewed-dir", help="Dir of exported per-image review JSON docs")
+    source.add_argument("--from-existing", action="store_true",
+                        help="Reuse the already-built data/real_labels/<batch-name>/ images + labels")
     parser.add_argument("--batch-name", default="fibre_batch1")
     parser.add_argument("--synth-fraction", type=float, default=0.20)
+    parser.add_argument("--holdout-fraction", type=float, default=0.25)
+    parser.add_argument("--real-repeat", type=int, default=10)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out-dir", default="data/finetune_fibre")
     args = parser.parse_args()
 
     real_out = Path("data/real_labels") / args.batch_name
-    real_images = build_real_labels(Path(args.reviewed_dir), real_out)
-    print(f"[Build] Wrote {len(real_images)} real fibre-labeled images to {real_out}")
+    if args.from_existing:
+        real_images = [p.resolve() for p in sorted((real_out / "images").glob("*.jpg"))]
+        if not real_images:
+            raise SystemExit(f"No images found under {real_out / 'images'}")
+        print(f"[Build] Reusing {len(real_images)} real fibre-labeled images from {real_out}")
+    else:
+        real_images = build_real_labels(Path(args.reviewed_dir), real_out)
+        print(f"[Build] Wrote {len(real_images)} real fibre-labeled images to {real_out}")
+
+    real_train, real_test = split_real(real_images, args.holdout_fraction, args.seed)
+    print(f"[Build] Real split: {len(real_train)} train / {len(real_test)} held-out test")
 
     synth_images = sample_synthetic(args.synth_fraction, args.seed)
     print(f"[Build] Sampled {len(synth_images)} synthetic images ({args.synth_fraction:.0%} of train set)")
@@ -83,18 +110,21 @@ def main() -> None:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     train_txt = out_dir / "train.txt"
-    train_txt.write_text("\n".join(str(p) for p in real_images + synth_images) + "\n")
+    train_images = real_train * args.real_repeat + synth_images
+    train_txt.write_text("\n".join(str(p) for p in train_images) + "\n")
+    test_txt = out_dir / "test.txt"
+    test_txt.write_text("\n".join(str(p) for p in real_test) + "\n")
 
     dataset_yaml = out_dir / "dataset.yaml"
     dataset_yaml.write_text(
         "path: .\n"
         f"train: {train_txt.resolve()}\n"
-        f"val: {SYNTH_VAL_IMAGES.resolve()}\n"
+        f"val: {test_txt.resolve()}\n"
         f"nc: {len(DATASET_YAML_NAMES)}\n"
         "names:\n" + "".join(f"- {n}\n" for n in DATASET_YAML_NAMES)
     )
-    print(f"[Build] Combined train set: {len(real_images)} real + {len(synth_images)} synthetic = "
-          f"{len(real_images) + len(synth_images)} images")
+    print(f"[Build] Combined train set: {len(real_train)} real x{args.real_repeat} + "
+          f"{len(synth_images)} synthetic = {len(train_images)} entries; val = {len(real_test)} real held-out")
     print(f"[Build] Dataset yaml: {dataset_yaml}")
 
 
