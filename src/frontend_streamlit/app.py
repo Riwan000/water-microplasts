@@ -10,7 +10,14 @@ React rebuild — see docs/revised-microplastic-detector-plan.md.
 import base64
 import io
 import os
+import sys
+from pathlib import Path
 from collections import Counter
+
+# Ensure project root is in sys.path so 'src' imports resolve reliably
+_PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 import requests
 import streamlit as st
