@@ -29,7 +29,10 @@ def _render_gallery(image: Image.Image, particles: list[dict], empty_message: st
         col = columns[idx % _GALLERY_COLUMNS]
         with col:
             crop = _crop(image, particle.get("bbox", [0, 0, 1, 1]))
-            st.image(crop, use_container_width=True)
+            try:
+                st.image(crop, use_container_width=True)
+            except TypeError:
+                st.image(crop, use_column_width=True)
             st.caption(f"**{particle.get('class_name', 'unknown')}** · {particle.get('confidence', 0):.2f}")
             with st.expander(f"Particle {particle.get('particle_id', idx)}"):
                 st.write(f"Length: {particle.get('length_um', 0):.1f} µm")
