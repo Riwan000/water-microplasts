@@ -102,6 +102,10 @@ source .venv/bin/activate   # macOS/Linux
 # 3. Install dependencies
 pip install -r requirements.txt
 
+# 3b. (NVIDIA GPU, optional) swap the CPU-only torch that ultralytics pulls in
+#     for the CUDA build — ~4x faster inference. cu126 needs driver >= 560.
+pip install --force-reinstall --no-deps torch==2.14.0+cu126 torchvision==0.29.0+cu126 --index-url https://download.pytorch.org/whl/cu126
+
 # 4. Configure environment variables
 copy .env.example .env      # Windows
 cp .env.example .env        # macOS/Linux

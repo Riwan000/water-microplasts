@@ -10,6 +10,8 @@ from pathlib import Path
 
 from ultralytics import YOLO
 
+from src.training.train import archive_existing_run
+
 MODELS_DIR = "models"
 IMG_SIZE = 640
 DEFAULT_BATCH = 8
@@ -29,6 +31,9 @@ def main() -> None:
     parser.add_argument("--name", default="yolo11s-seg-finetune-fibre")
     args = parser.parse_args()
 
+    archived = archive_existing_run(Path(MODELS_DIR) / args.name)
+    if archived:
+        print(f"[Finetune] Archived previous run to {archived}")
     model = YOLO(args.weights)
     results = model.train(
         data=args.dataset,

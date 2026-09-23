@@ -5,6 +5,8 @@ yolo11s-seg) on data/yolo_dataset and writes weights under models/<arch>/.
 """
 
 import argparse
+import shutil
+from datetime import datetime
 from pathlib import Path
 
 from ultralytics import YOLO
@@ -17,6 +19,29 @@ IMG_SIZE = 640
 # (default workers=8) that exhausted available memory on this machine.
 DEFAULT_BATCH = 8
 DEFAULT_WORKERS = 2
+ARCHIVE_DIR = "archive"
+
+
+def archive_existing_run(run_dir: Path) -> Path | None:
+    """Move a previous run out of the way so a new run never overwrites it.
+
+    Keeps models/<name>/ as the stable path benchmark.py reads, while old
+    runs are preserved under models/archive/<name>-<timestamp>/.
+    """
+    if not run_dir.exists():
+        return None
+    stamp = datetime.fromtimestamp(run_dir.stat().st_mtime).strftime("%Y%m%d-%H%M%S")
+    destination = run_dir.parent / ARCHIVE_DIR / f"{run_dir.name}-{stamp}"
+    if destination.exists():
+        raise FileExistsError(f"Archive target already exists: {destination}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.move(str(run_dir), str(destination))
+    except PermissionError as e:
+        raise PermissionError(
+            f"Cannot archive {run_dir}: a file is in use (stop the backend if it loads these weights)."
+        ) from e
+    return destination
 
 
 def train_model(
@@ -28,6 +53,9 @@ def train_model(
     workers: int = DEFAULT_WORKERS,
 ) -> str:
     """Train one candidate model and return the path to its best weights."""
+    archived = archive_existing_run(Path(MODELS_DIR) / model_name)
+    if archived:
+        print(f"[Train] Archived previous run to {archived}")
     model = YOLO(f"{model_name}.pt")
     results = model.train(
         data=dataset_yaml,
