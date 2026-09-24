@@ -9,12 +9,6 @@ __pycache__/
 venv/
 env/
 
-# Model weights / checkpoints
-*.pt
-*.pth
-*.onnx
-*.weights
-
 # Ultralytics default run outputs (train.py/benchmark.py redirect real runs to models/)
 runs/
 
